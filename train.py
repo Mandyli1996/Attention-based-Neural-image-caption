@@ -1,3 +1,4 @@
+#coding=utf-8
 # Import TensorFlow and enable eager execution
 # This code requires TensorFlow version >=1.9
 import tensorflow as tf
@@ -40,13 +41,13 @@ from collections import OrderedDict
 def get_args():
     """ Defines training-specific hyper-parameters. """
     parser = argparse.ArgumentParser('Attention-based image caption model')
-    parser.add_argument('--BATCH_SIZE', default=20, help='batch size of the dataset')
+    parser.add_argument('--BATCH_SIZE', default=20, type= int,help='batch size of the dataset')
 
     # Add data arguments
-    parser.add_argument('--BUFFER_SIZE', default=1000, help='buffer size')
-    parser.add_argument('--embedding_dim', default=256, help='source language')
-    parser.add_argument('--units', default=512, help='target language')
-    parser.add_argument('--EPOCHS', default= 40, type= int, help='train model on a tiny dataset')
+    parser.add_argument('--BUFFER_SIZE', default=1000, type= int,help='buffer size')
+    parser.add_argument('--embedding_dim', default=128, type= int,help='source language')
+    parser.add_argument('--units', default=128, type= int, help='target language')
+    parser.add_argument('--EPOCHS', default= 30, type= int, help='train model on a tiny dataset')
 
     # Add model arguments
     parser.add_argument('--score_model', default="default", help='score of attention:default,general,concat')
@@ -60,10 +61,11 @@ def get_args():
     parser.add_argument('--file_tar', default='target.txt', help='filename to load checkpoint')
     parser.add_argument('--file_losstrain', default= "losstrainresult.txt", help='save a checkpoint every N epochs')
     parser.add_argument('--file_lossval', default='lossvalresult.txt', help='don\'t save models or checkpoints')
-    parser.add_argument('--attention_features_shape', default=100, help='don\'t save models or checkpoints')
-    
-    parser.add_argument('--DDD', default=1, help='target language')
-    
+    parser.add_argument('--attention_features_shape', default=100,type= int, help='don\'t save models or checkpoints')
+    parser.add_argument('--ckp',default='False',help='checkpoint')
+    parser.add_argument('--DDD', default=1, type= int, help='target language')
+    parser.add_argument('--exp', default='1',help='the number of experiment')
+    parser.add_argument('--epochs',default='1',help='the epochs we want to continues')
   #  parser.add_argument('--context_vector_concat', default=True, help='target language')
     parser.add_argument('--num_layers', default=1, help='target language')
     parser.add_argument('--context_vector_concat', default="True", help='target language')
@@ -74,6 +76,9 @@ def get_args():
 
 
 def main(args):
+    ckp = args.ckp
+    exp= args.exp
+    ckp_epochs = args.epochs
     BATCH_SIZE = args.BATCH_SIZE
     BUFFER_SIZE = args.BUFFER_SIZE
     embedding_dim = args.embedding_dim
@@ -85,7 +90,7 @@ def main(args):
     features_shape = 2048
     attention_features_shape = args.attention_features_shape
     EPOCHS = args.EPOCHS
-    score_model="concat"
+    score_model=args.score_model
     #"default":
     # "general":
     # "concat"
@@ -145,10 +150,10 @@ def main(args):
                                               random_state=1)
 
     # selecting the first 30000 captions from the shuffled set
-    #取前30000个照片出来做 train
+    #取前100000个照片出来做 train
     #######################################
     #######################################
-    num_examples = 30000
+    num_examples = 8000
     train_captions = train_captions[:num_examples]
     img_name_vector = img_name_vector[:num_examples]
     print("dataset_size")
@@ -170,14 +175,14 @@ def main(args):
                                      encode_train).map(load_image).batch(16)
 
     #用Dataset创建一个image_dataset包含已经处理过的image和地址 并分成了batch_size = 16. 
-    #for (img, path) in image_dataset:
-     #    batch_features = image_features_extract_model(img)
-      #   batch_features = tf.reshape(batch_features, 
-       #                            (batch_features.shape[0], -1, batch_features.shape[3]))
-#
- #        for bf, p in zip(batch_features, path):
-  #           path_of_feature = p.numpy().decode("utf-8")
-   #          np.save(path_of_feature, bf.numpy())
+#    for (img, path) in image_dataset:
+#        batch_features = image_features_extract_model(img)
+#        batch_features = tf.reshape(batch_features,
+#                                  (batch_features.shape[0], -1, batch_features.shape[3]))
+
+#        for bf, p in zip(batch_features, path):
+#            path_of_feature = p.numpy().decode("utf-8")
+#            np.save(path_of_feature, bf.numpy())
     #将batch_features提取出来 并和 path一起保存起来
 
     #-------------------------cnngetthefeature------------------------
@@ -195,9 +200,9 @@ def main(args):
     train_seqs = tokenizer.texts_to_sequences(train_captions)
     tokenizer.word_index = {key:value for key, value in tokenizer.word_index.items() if value <= top_k}
     # putting <unk> token in the word2idx dictionary
-    tokenizer.word_index[tokenizer.oov_token] = top_k + 1
+    tokenizer.word_index[tokenizer.oov_token] = 1
     tokenizer.word_index['<pad>'] = 0
-
+    
     # creating the tokenized vectors
     train_seqs = tokenizer.texts_to_sequences(train_captions)
 
@@ -205,7 +210,7 @@ def main(args):
     index_word = {value:key for key, value in tokenizer.word_index.items()}
     vocab_size = len(tokenizer.word_index)
     index_word[1]='<unk>'
-
+    #index_word[10001]='<unk>'
     # padding each vector to the max_length of the captions
     # if the max_length parameter is not provided, pad_sequences calculates that automatically
     cap_vector = tf.keras.preprocessing.sequence.pad_sequences(train_seqs, padding='post')
@@ -238,30 +243,38 @@ def main(args):
     dataset_val = dataset_val.prefetch(1)
     print("dataset finished")
 #-------------------dataset------------------------
+    #if ckp == "True":
+    with tf.device('/gpu:0'):
+        encoder = CNN_Encoder(embedding_dim)
+        #embedding_dim, units, vocab_size,
 
-    encoder = CNN_Encoder(embedding_dim)
-    #embedding_dim, units, vocab_size,
+        decoder = RNN_Decoder(embedding_dim, units, vocab_size, directional=False, dropout=0, models=models, \
+                              num_layers=num_layers, attention_feature_shape = attention_features_shape, local_att_t = local_att, D=DDD_t)
 
-    decoder = RNN_Decoder(embedding_dim, units, vocab_size, directional=False, dropout=0, models=models, \
-                          num_layers=num_layers, attention_feature_shape = attention_features_shape)
-
-    optimizer = tf.train.AdamOptimizer()
+        optimizer = tf.train.AdamOptimizer(0.000004)
+    if ckp == 'True':
+        encoder.load_weights('./checkpoint/'+exp+'_encoderepochs'+ckp_epochs)
+        decoder.load_weights('./checkpoint/'+exp+'_decoderepochs'+ckp_epochs)
     print("Begin training !")
     # We are masking the loss calculated for padding
 
-    result_ulti=[]
-    target_ulti = []
+    #result_ulti=[]
+    #target_ulti = []
     loss_plot = []
     loss_plot1 = []
 
-    for epoch in range(EPOCHS):
+    for epoch in range(int(ckp_epochs),EPOCHS):
         start = time.time()
         total_loss = 0
         total_valloss=0
+        result_ulti = []
+        target_ulti = []
+        #loss_plot =[]
+        #loss_plot1 = []
 
         for (batch, (img_tensor, target)) in enumerate(dataset):
-            start_1 = time.time()
-            print(batch,"-----------------------")
+            #start_1 = time.time()
+            #print(batch,"-----------------------")
             loss = 0
             # initializing the hidden state for each batch
             # because the captions are not related from image to image
@@ -286,17 +299,22 @@ def main(args):
             gradients = tape.gradient(loss, variables) 
 
             optimizer.apply_gradients(zip(gradients, variables), tf.train.get_or_create_global_step())
-            print(batch,"---------------",loss,"-------------",time.time()-start_1,"-------------------")
+            #print(batch,"---------------",loss,"-------------",time.time()-start_1,"-------------------")
             if batch % 100 == 0:
                 print ('Epoch {} Batch {} Train_Loss {:.4f}'.format(epoch + 1, 
                                                               batch, 
                                                               loss.numpy() / int(target.shape[1])))
+                #print (time.time()-start_1)
+
 
         # storing the epoch end loss value to plot later
         loss_plot.append((total_loss / train_length).numpy())
-        if epoch == EPOCHS-1:
+        if epoch != -1:
             file_losstrain.write(str(loss_plot))
-            file_losstrain.close()
+            file_losstrain.write('\n'+'end of epochs '+str(epoch+1)+'\n')
+        
+        encoder.save_weights('./checkpoint/'+exp+'_encoderepochs'+str(epoch+1))
+        decoder.save_weights('./checkpoint/'+exp+'_decoderepochs'+str(epoch+1))
 
         print ('Epoch {} Train_Loss {:.6f}'.format(epoch + 1, 
                                              total_loss/train_length))
@@ -325,12 +343,12 @@ def main(args):
                 predicted_id = tf.multinomial(predictions, num_samples=1)
                # print("predictionid",predicted_id,target[:, i] )
                 prediction_li=predicted_id.numpy().tolist()
-                if epoch == EPOCHS-1:
+                if epoch != -1:
                     for k in prediction_li:
                         result.append(index_word[k[0]])
 
                 loss_val += loss_function(target[:, i], predictions)
-                if epoch == EPOCHS-1:   
+                if epoch != -1:   
                     target_li=target[:, i].numpy().tolist()
                     for k in target_li:
                         target_list.append(index_word[k])
@@ -338,10 +356,10 @@ def main(args):
                 # using teacher forcing
                 dec_input = predicted_id
             total_valloss += (loss_val / prediction_length)
-            if epoch == EPOCHS-1:
+            if epoch != -1:
                 result_ulti.append(result)
-                target_ulti.append(target_list)
-            print(batch,"-----------------------------------------------")
+             #   target_ulti.append(target_list)
+            #print(batch,"-----------------------------------------------")
             if batch % 100 == 0:
                 print ('Epoch {} Batch {} Validation_Loss {:.4f}'.format(epoch + 1, 
                                                               batch, 
@@ -354,7 +372,7 @@ def main(args):
                                              total_valloss/val_length))
         print ('Time taken for 1 epoch {} sec\n'.format(time.time() - start_val))
 
-        if epoch == EPOCHS-1:
+        if epoch != -1:
             for temp in result_ulti:
                 tempnum= np.array(temp).reshape(48,20).T
                 for i in range(tempnum.shape[0]):
@@ -370,9 +388,12 @@ def main(args):
                             file_pre.write('\n')
                         else :
                             file_pre.write(j+' ')
-            file_pre.close()
+                    if i == 19:
+                        file_pre.write('\n')
+            file_pre.write('end of epochs '+ str(epoch+1) +'\n')
+            #file_pre.close()
 
-        if epoch == EPOCHS-1:
+        if epoch != -1:
             for temp in target_ulti:
                 tempnum= np.array(temp).reshape(48,20).T
                 for i in range(tempnum.shape[0]):
@@ -385,20 +406,25 @@ def main(args):
                             break
                         else :
                             file_tar.write(j+' ')
-            file_tar.close()
+            file_tar.write('\n'+'end of epochs'+ str(epoch +1)+ '\n')
+            #file_tar.close()
             file_lossval.write(str(loss_plot1))
-            file_lossval.close()
-
+            file_lossval.write('\n'+'end of epochs '+ str(epoch +1)+'\n')
+         #   file_lossval.close()
+    file_lossval.close()
+    file_losstrain.close()
+    file_pre.close()
+    file_tar.close()
 
     #------------------------------------------
 
-    plt.plot(loss_plot1,label="loss of val")
-    plt.plot(loss_plot,label="loss of train")
-    plt.xlabel('Epochs')
-    plt.ylabel('Loss')
-    plt.title('Loss Plot')
-    plt.legend()
-    plt.show()
+    #plt.plot(loss_plot1,label="loss of val")
+    #plt.plot(loss_plot,label="loss of train")
+    #plt.xlabel('Epochs')
+    #plt.ylabel('Loss')
+    #plt.title('Loss Plot')
+    #plt.legend()
+    #plt.show()
     #-------------------------------------------
 
 
